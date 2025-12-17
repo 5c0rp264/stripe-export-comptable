@@ -64,6 +64,7 @@ def process_payout_data(raw_data: Dict[str, Any]) -> PayoutExportData:
     total_remboursements = Decimal(0)
     total_frais = Decimal(0)
     total_litiges = Decimal(0)
+    total_echecs_paiement = Decimal(0)  # Payment failures
     total_autres = Decimal(0)
     
     for bt in balance_transactions:
@@ -112,6 +113,12 @@ def process_payout_data(raw_data: Dict[str, Any]) -> PayoutExportData:
             total_paiements += cents_to_decimal(bt.amount)
             # Add processing fees from this transaction
             total_frais += abs(cents_to_decimal(bt.fee))
+        elif bt.type in ('payment_failure', 'payment_failure_refund'):
+            # Payment failures and their refunds are tracked separately
+            total_echecs_paiement += abs(cents_to_decimal(bt.amount))
+            # Track any fees on payment failures
+            if bt.fee != 0:
+                total_frais += abs(cents_to_decimal(bt.fee))
         elif bt.type == 'refund':
             total_remboursements += abs(cents_to_decimal(bt.amount))
             # Refunds may have fee reversals (negative fees) - track if any
@@ -255,6 +262,7 @@ def process_payout_data(raw_data: Dict[str, Any]) -> PayoutExportData:
         total_remboursements=total_remboursements,
         total_frais=total_frais,
         total_litiges=total_litiges,
+        total_echecs_paiement=total_echecs_paiement,
         total_autres=total_autres,
         nb_transactions=len(transactions),
         nb_factures=len(invoice_records),
@@ -296,6 +304,56 @@ def create_zip_archive(source_dir: str, output_path: str) -> str:
                 zipf.write(file_path, arcname)
     
     return output_path
+
+
+def create_complete_export_zip(output_dir: str, payout_folders: List[str]) -> str:
+    """
+    Create a complete export ZIP containing the GUIDE, all payout folders,
+    and the factures_stripe folder.
+    
+    Args:
+        output_dir: Base output directory
+        payout_folders: List of payout folder names that were processed
+        
+    Returns:
+        Path to the created ZIP file
+    """
+    zip_path = os.path.join(output_dir, "export_comptable_complet.zip")
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Add the GUIDE PDF
+        guide_path = os.path.join(output_dir, "GUIDE_Factures_Stripe.pdf")
+        if os.path.exists(guide_path):
+            zipf.write(guide_path, "GUIDE_Factures_Stripe.pdf")
+        
+        # Add all payout folders
+        for folder_name in payout_folders:
+            folder_path = os.path.join(output_dir, folder_name)
+            if os.path.isdir(folder_path):
+                for root, dirs, files in os.walk(folder_path):
+                    # Add directory entries for empty directories
+                    for dir_name in dirs:
+                        dir_path = os.path.join(root, dir_name)
+                        arcname = os.path.relpath(dir_path, output_dir) + '/'
+                        zipf.write(dir_path, arcname)
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, output_dir)
+                        zipf.write(file_path, arcname)
+        
+        # Add the factures_stripe folder (even if empty)
+        factures_stripe_dir = os.path.join(output_dir, "factures_stripe")
+        if os.path.isdir(factures_stripe_dir):
+            # Add the empty folder entry
+            zipf.writestr("factures_stripe/", "")
+            # Add any files if present
+            for root, dirs, files in os.walk(factures_stripe_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, output_dir)
+                    zipf.write(file_path, arcname)
+    
+    return zip_path
 
 
 def export_payout(
@@ -661,12 +719,16 @@ def main(
     
     download_invoices = not no_invoices
     exported_files = []
+    payout_folders = []  # Track folder names for complete ZIP
     
     try:
         if payout:
             # Single payout mode
             zip_path = export_payout(payout, client, output_dir, download_invoices)
             exported_files.append(zip_path)
+            # Extract folder name from zip path
+            folder_name = os.path.basename(zip_path).replace('.zip', '')
+            payout_folders.append(folder_name)
         else:
             # Date range mode
             status_filter = None if status == 'all' else status
@@ -713,6 +775,9 @@ def main(
                 try:
                     zip_path = export_payout(p.id, client, output_dir, download_invoices)
                     exported_files.append(zip_path)
+                    # Extract folder name from zip path
+                    folder_name = os.path.basename(zip_path).replace('.zip', '')
+                    payout_folders.append(folder_name)
                 except Exception as e:
                     click.echo(f"❌ Erreur pour {p.id}: {e}", err=True)
                     continue
@@ -721,14 +786,23 @@ def main(
         click.echo("\n📄 Génération du guide pour les factures Stripe...")
         generate_stripe_invoices_guide(output_dir)
         
+        # Create complete export ZIP
+        if payout_folders:
+            click.echo("\n🗜️  Création de l'archive complète pour le comptable...")
+            complete_zip = create_complete_export_zip(output_dir, payout_folders)
+            click.echo(f"✅ Archive complète créée: {complete_zip}")
+        
         # Summary
         click.echo(f"\n{'='*60}")
         click.echo("RÉCAPITULATIF")
         click.echo('='*60)
-        click.echo(f"✅ {len(exported_files)} export(s) créé(s):")
+        click.echo(f"✅ {len(exported_files)} export(s) individuel(s) créé(s):")
         for f in exported_files:
             click.echo(f"   • {f}")
-        click.echo(f"\n📁 Dossier frais_stripe/ créé pour les factures mensuelles Stripe")
+        click.echo("\n📁 Dossier factures_stripe/ créé pour les factures mensuelles Stripe")
+        if payout_folders:
+            click.echo("\n📦 Archive complète pour le comptable:")
+            click.echo(f"   • {os.path.join(output_dir, 'export_comptable_complet.zip')}")
         
     except Exception as e:
         click.echo(f"\n❌ Erreur fatale: {e}", err=True)

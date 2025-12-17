@@ -110,21 +110,49 @@ python -m src.main --payout po_xxxxx --api-key sk_live_xxxxx
 
 ## 📁 Structure des exports
 
-Chaque virement génère un dossier ZIP contenant :
+### Fichiers générés
+
+Lors de l'exécution, l'outil génère plusieurs types de fichiers :
 
 ```
-payout_20241215_po_xxxxx/
-├── resume.csv              # Récapitulatif du virement
-├── transactions.csv        # Toutes les transactions
-├── factures.csv           # Liste des factures
-├── frais.csv              # Détail des frais Stripe
-├── recap_payout.xlsx      # Classeur Excel complet
-├── rapport_comptable.pdf  # Rapport PDF synthétique
-└── factures/              # Factures PDF téléchargées
-    ├── INV-0001.pdf
-    ├── INV-0002.pdf
-    └── ...
+output/
+├── GUIDE_Factures_Stripe.pdf           # Guide pour télécharger les factures Stripe
+├── factures_stripe/                     # Dossier pour les factures mensuelles Stripe
+├── export_comptable_complet.zip        # Archive complète pour le comptable
+├── payout_20241215_po_xxxxx/           # Dossier d'un virement
+│   ├── resume.csv
+│   ├── transactions.csv
+│   ├── factures.csv
+│   ├── frais.csv
+│   ├── recap_payout.xlsx
+│   ├── rapport_comptable.pdf
+│   └── factures/
+│       └── INV-0001.pdf
+└── payout_20241215_po_xxxxx.zip        # Archive individuelle du virement
 ```
+
+### 📦 Utilisation des archives ZIP
+
+#### Archives individuelles (`payout_XXXXXX_po_xxxxx.zip`)
+
+Ces archives contiennent les justificatifs d'**un seul virement**. Elles sont destinées à être utilisées comme :
+
+- **Justificatifs bancaires** : À téléverser sur votre espace bancaire en ligne comme preuve de l'opération
+- **Pièces comptables unitaires** : Le `rapport_comptable.pdf` peut servir de justificatif individuel
+
+> 💡 **Conseil** : Vous pouvez également utiliser uniquement le fichier `rapport_comptable.pdf` comme justificatif simplifié.
+
+#### Archive complète (`export_comptable_complet.zip`)
+
+Cette archive regroupe **tous les exports en un seul fichier** et contient :
+
+- Le guide explicatif pour les factures Stripe
+- Tous les dossiers de virements traités
+- Le dossier `factures_stripe/` pour y ajouter les factures mensuelles Stripe
+
+**Usage principal** : **Envoi au comptable** - Cette archive unique contient l'ensemble des justificatifs nécessaires pour la comptabilisation des mouvements Stripe sur la période.
+
+> 📧 **Workflow recommandé** : Exécutez l'export, téléchargez vos factures Stripe mensuelles dans le dossier `factures_stripe/`, puis envoyez l'archive complète à votre comptable.
 
 ## 📊 Format des données
 

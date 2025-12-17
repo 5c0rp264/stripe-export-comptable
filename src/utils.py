@@ -13,6 +13,8 @@ import locale
 TRANSACTION_TYPES = {
     "charge": "Paiement",
     "payment": "Paiement",
+    "payment_failure": "Tentative de paiement échouée",
+    "payment_failure_refund": "Tentative de paiement échouée",
     "refund": "Remboursement",
     "adjustment": "Ajustement",
     "application_fee": "Commission Application",

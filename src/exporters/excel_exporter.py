@@ -119,6 +119,7 @@ class ExcelExporter:
             ("Total Remboursements", self._format_decimal(summary.total_remboursements), summary.devise),
             ("Total Frais Stripe", self._format_decimal(summary.total_frais), summary.devise),
             ("Total Litiges", self._format_decimal(summary.total_litiges), summary.devise),
+            ("Total Échecs Paiement", self._format_decimal(summary.total_echecs_paiement), summary.devise),
             ("Total Autres", self._format_decimal(summary.total_autres), summary.devise),
         ]
         

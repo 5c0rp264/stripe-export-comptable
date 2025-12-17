@@ -219,6 +219,7 @@ class CSVExporter:
                 ["Total Remboursements", f"{self._format_decimal_fr(summary.total_remboursements)} {summary.devise}"],
                 ["Total Frais Stripe", f"{self._format_decimal_fr(summary.total_frais)} {summary.devise}"],
                 ["Total Litiges", f"{self._format_decimal_fr(summary.total_litiges)} {summary.devise}"],
+                ["Total Échecs Paiement", f"{self._format_decimal_fr(summary.total_echecs_paiement)} {summary.devise}"],
                 ["Total Autres", f"{self._format_decimal_fr(summary.total_autres)} {summary.devise}"],
                 ["", ""],
                 ["Statistiques", ""],

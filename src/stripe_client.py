@@ -284,6 +284,36 @@ class StripeClient:
             pass
         return None
     
+    def _find_invoice_for_charge(self, charge: stripe.Charge) -> Optional[stripe.Invoice]:
+        """
+        Find invoice associated with a Charge by searching customer's invoices.
+        
+        This handles the case where the Invoice references the Charge but
+        the Charge doesn't have the Invoice reference (common with SEPA payments).
+        """
+        if not charge or not charge.customer:
+            return None
+            
+        customer_id = charge.customer if isinstance(charge.customer, str) else charge.customer.id
+        charge_id = charge.id
+        
+        try:
+            # List invoices for this customer and find the one with matching charge
+            invoices = stripe.Invoice.list(customer=customer_id, limit=100)
+            for invoice in invoices.auto_paging_iter():
+                invoice_charge_id = None
+                if invoice.charge:
+                    invoice_charge_id = invoice.charge if isinstance(invoice.charge, str) else invoice.charge.id
+                if invoice_charge_id == charge_id:
+                    # Found the matching invoice - retrieve with expansions
+                    return stripe.Invoice.retrieve(
+                        invoice.id,
+                        expand=["customer", "charge", "subscription"]
+                    )
+        except (stripe.error.InvalidRequestError, stripe.error.APIError):
+            pass
+        return None
+    
     def _extract_invoice_from_charge(
         self, 
         charge: stripe.Charge, 
@@ -332,7 +362,19 @@ class StripeClient:
                         seen_invoices.add(invoice_id)
                         return invoice_id
         
-        # Fetch and add invoice if found (and not already added via Path 3)
+        # Path 4: Search customer's invoices for matching charge ID (for SEPA payments)
+        # This handles cases where the invoice references the charge but the charge
+        # doesn't reference the invoice
+        if not invoice_id:
+            found_invoice = self._find_invoice_for_charge(charge)
+            if found_invoice:
+                invoice_id = found_invoice.id
+                if invoice_id not in seen_invoices:
+                    invoices.append(found_invoice)
+                    seen_invoices.add(invoice_id)
+                    return invoice_id
+        
+        # Fetch and add invoice if found (and not already added via Path 3 or 4)
         if invoice_id and invoice_id not in seen_invoices:
             invoice = self.get_invoice(invoice_id)
             if invoice:
@@ -519,7 +561,8 @@ class StripeClient:
                 
                 # Handle sources that look like charge IDs but with different format
                 # Some older balance transactions might have different formats
-                elif bt.type in ('charge', 'payment') and not source.startswith(('payout', 'po_')):
+                # Also handle payment_failure transactions which may have associated charges/invoices
+                elif bt.type in ('charge', 'payment', 'payment_failure') and not source.startswith(('payout', 'po_')):
                     # Try to retrieve as a charge anyway
                     try:
                         charge = stripe.Charge.retrieve(
@@ -529,7 +572,16 @@ class StripeClient:
                         if charge and charge.id not in seen_charges:
                             charges.append(charge)
                             seen_charges.add(charge.id)
-                            self._extract_invoice_from_charge(charge, seen_invoices, invoices)
+                            invoice_found = self._extract_invoice_from_charge(charge, seen_invoices, invoices)
+                            
+                            # For payment_failure, also try to find invoice via PaymentIntent
+                            if not invoice_found and charge.payment_intent:
+                                pi_id = charge.payment_intent.id if hasattr(charge.payment_intent, 'id') else charge.payment_intent
+                                if pi_id:
+                                    found_invoice = self._find_invoice_for_payment_intent(pi_id)
+                                    if found_invoice and found_invoice.id not in seen_invoices:
+                                        invoices.append(found_invoice)
+                                        seen_invoices.add(found_invoice.id)
                     except stripe.error.InvalidRequestError:
                         pass
         

@@ -244,6 +244,13 @@ class PDFExporter:
                 self._format_signed_amount(summary.total_litiges, summary.devise, False),
             ])
         
+        # Payment failures are negative (debits) - shown as separate line
+        if summary.total_echecs_paiement > 0:
+            financial_data.append([
+                "Tentatives de paiement échouées",
+                self._format_signed_amount(summary.total_echecs_paiement, summary.devise, False),
+            ])
+        
         # Other amounts (can be positive or negative)
         if summary.total_autres != 0:
             is_positive = summary.total_autres > 0

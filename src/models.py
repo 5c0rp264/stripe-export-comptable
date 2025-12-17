@@ -178,6 +178,7 @@ class PayoutSummary:
     total_remboursements: Decimal = Decimal(0)
     total_frais: Decimal = Decimal(0)
     total_litiges: Decimal = Decimal(0)
+    total_echecs_paiement: Decimal = Decimal(0)  # Payment failures
     total_autres: Decimal = Decimal(0)
     
     # Counts
@@ -201,6 +202,7 @@ class PayoutSummary:
             "Total Remboursements": self.total_remboursements,
             "Total Frais Stripe": self.total_frais,
             "Total Litiges": self.total_litiges,
+            "Total Échecs Paiement": self.total_echecs_paiement,
             "Total Autres": self.total_autres,
             "Nb Transactions": self.nb_transactions,
             "Nb Factures": self.nb_factures,
