@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Dict, Any
 
-from ..models import PayoutExportData, TransactionRecord, InvoiceRecord, FeeRecord
+from ..models import PayoutExportData, TransactionRecord, InvoiceRecord, FeeRecord, RefundRecord, CreditNoteRecord
 from ..utils import format_date_fr, format_currency_fr, cents_to_decimal
 
 
@@ -227,9 +227,112 @@ class CSVExporter:
                 ["Nombre de Factures", str(summary.nb_factures)],
                 ["Nombre de Remboursements", str(summary.nb_remboursements)],
                 ["Nombre de Litiges", str(summary.nb_litiges)],
+                ["Nombre d'Avoirs", str(len(data.credit_notes))],
             ]
             
             for row in rows:
+                writer.writerow(row)
+        
+        return filepath
+    
+    def export_refunds(
+        self,
+        refunds: List[RefundRecord],
+        filename: str = "remboursements.csv"
+    ) -> str:
+        """
+        Export refunds to CSV.
+        
+        Args:
+            refunds: List of RefundRecord objects
+            filename: Output filename
+            
+        Returns:
+            Path to the created file
+        """
+        filepath = os.path.join(self.output_dir, filename)
+        
+        headers = [
+            "Date",
+            "ID Remboursement",
+            "Montant",
+            "Devise",
+            "Statut",
+            "Raison",
+            "Client",
+            "N° Facture",
+            "ID Charge",
+            "N° Avoir"
+        ]
+        
+        with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(headers)
+            
+            for ref in refunds:
+                row = [
+                    self._format_date(ref.date),
+                    ref.refund_id,
+                    self._format_decimal_fr(ref.montant),
+                    ref.devise,
+                    ref.statut,
+                    ref.raison or "",
+                    ref.client_nom or "",
+                    ref.invoice_number or "",
+                    ref.charge_id or "",
+                    ref.credit_note_number or ""
+                ]
+                writer.writerow(row)
+        
+        return filepath
+    
+    def export_credit_notes(
+        self,
+        credit_notes: List[CreditNoteRecord],
+        filename: str = "avoirs.csv"
+    ) -> str:
+        """
+        Export credit notes to CSV.
+        
+        Args:
+            credit_notes: List of CreditNoteRecord objects
+            filename: Output filename
+            
+        Returns:
+            Path to the created file
+        """
+        filepath = os.path.join(self.output_dir, filename)
+        
+        headers = [
+            "N° Avoir",
+            "Date",
+            "N° Facture Origine",
+            "Client",
+            "Email",
+            "Montant",
+            "Devise",
+            "Statut",
+            "Raison",
+            "ID Stripe"
+        ]
+        
+        with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(headers)
+            
+            for cn in credit_notes:
+                row = [
+                    cn.numero,
+                    self._format_date(cn.date),
+                    cn.invoice_number or "",
+                    cn.client_nom,
+                    cn.client_email,
+                    self._format_decimal_fr(cn.montant),
+                    cn.devise,
+                    cn.statut,
+                    cn.raison or "",
+                    cn.stripe_id
+                ]
                 writer.writerow(row)
         
         return filepath
@@ -254,6 +357,12 @@ class CSVExporter:
         
         if data.fees:
             results['fees'] = self.export_fees(data.fees)
+        
+        if data.refunds:
+            results['refunds'] = self.export_refunds(data.refunds)
+        
+        if data.credit_notes:
+            results['credit_notes'] = self.export_credit_notes(data.credit_notes)
         
         return results
 

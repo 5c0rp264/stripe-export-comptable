@@ -57,6 +57,29 @@ FEE_TYPES = {
     "tax": "Taxe",
 }
 
+# Refund reason translations
+REFUND_REASONS = {
+    "duplicate": "Doublon",
+    "fraudulent": "Fraude",
+    "requested_by_customer": "Demande client",
+    "expired_uncaptured_charge": "Charge expirée",
+}
+
+# Credit note status translations
+CREDIT_NOTE_STATUS = {
+    "issued": "Émis",
+    "void": "Annulé",
+}
+
+# Refund status translations
+REFUND_STATUS = {
+    "pending": "En attente",
+    "succeeded": "Effectué",
+    "failed": "Échoué",
+    "canceled": "Annulé",
+    "requires_action": "Action requise",
+}
+
 
 def format_currency_fr(
     amount_cents: int,
@@ -143,6 +166,23 @@ def translate_payout_status(status: str) -> str:
 def translate_fee_type(fee_type: str) -> str:
     """Translate fee type to French."""
     return FEE_TYPES.get(fee_type, fee_type.replace("_", " ").title())
+
+
+def translate_refund_reason(reason: Optional[str]) -> str:
+    """Translate refund reason to French."""
+    if not reason:
+        return ""
+    return REFUND_REASONS.get(reason, reason.replace("_", " ").title())
+
+
+def translate_refund_status(status: str) -> str:
+    """Translate refund status to French."""
+    return REFUND_STATUS.get(status, status.title())
+
+
+def translate_credit_note_status(status: str) -> str:
+    """Translate credit note status to French."""
+    return CREDIT_NOTE_STATUS.get(status, status.title())
 
 
 def get_customer_display_name(customer: Any) -> str:
@@ -263,4 +303,51 @@ def get_bank_account_display(bank_account: Any) -> str:
         parts.append(f"({bank_name})")
     
     return " ".join(parts)
+
+
+def get_stripe_dashboard_url(stripe_id: str, account_id: Optional[str] = None) -> Optional[str]:
+    """
+    Get the Stripe dashboard URL for a given Stripe object ID.
+    
+    Args:
+        stripe_id: A Stripe object ID (e.g., ch_xxx, po_xxx, re_xxx)
+        account_id: The Stripe account ID (acct_xxx) for building full URLs
+        
+    Returns:
+        Dashboard URL or None if the ID format is not recognized or not linkable
+    """
+    if not stripe_id:
+        return None
+    
+    # Mapping of Stripe ID prefixes to dashboard paths
+    # Only include objects that have actual dashboard pages
+    url_mappings = {
+        "ch_": "payments",           # Charges
+        "pi_": "payments",           # Payment Intents
+        "py_": "payments",           # Legacy payments
+        "re_": "refunds",            # Refunds
+        "po_": "payouts",            # Payouts
+        "dp_": "disputes",           # Disputes
+        "in_": "invoices",           # Invoices
+        "cus_": "customers",         # Customers
+        "sub_": "subscriptions",     # Subscriptions
+        "tr_": "connect/transfers",  # Transfers
+    }
+    
+    # Balance transactions (txn_) don't have their own dashboard page
+    # Use the source object instead
+    if stripe_id.startswith("txn_"):
+        return None
+    
+    base_url = "https://dashboard.stripe.com"
+    
+    for prefix, path in url_mappings.items():
+        if stripe_id.startswith(prefix):
+            if account_id:
+                return f"{base_url}/{account_id}/{path}/{stripe_id}"
+            else:
+                return f"{base_url}/{path}/{stripe_id}"
+    
+    # For unknown prefixes, return None
+    return None
 

@@ -18,7 +18,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from ..models import PayoutExportData, TransactionRecord, PayoutSummary
-from ..utils import format_date_fr, format_currency_fr
+from ..utils import format_date_fr, format_currency_fr, get_stripe_dashboard_url
 
 
 class PDFExporter:
@@ -37,6 +37,7 @@ class PDFExporter:
             output_dir: Directory to save PDF files
         """
         self.output_dir = output_dir
+        self.account_id = None  # Will be set when export() is called
         os.makedirs(output_dir, exist_ok=True)
         self._setup_styles()
     
@@ -92,6 +93,14 @@ class PDFExporter:
             textColor=colors.gray,
             alignment=TA_CENTER
         ))
+        
+        # Link style for clickable references
+        self.styles.add(ParagraphStyle(
+            name='TableLink',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            textColor=self.SECONDARY_COLOR,
+        ))
     
     def _format_amount(self, amount: Decimal, currency: str) -> str:
         """Format amount with currency for display."""
@@ -107,9 +116,15 @@ class PDFExporter:
             self.styles['ReportTitle']
         ))
         
-        # Subtitle with payout ID
+        # Subtitle with payout ID (clickable link)
+        payout_url = get_stripe_dashboard_url(payout_id, self.account_id)
+        if payout_url:
+            payout_link = f'Virement Stripe: <a href="{payout_url}" color="#2E75B6"><u>{payout_id}</u></a>'
+        else:
+            payout_link = f"Virement Stripe: {payout_id}"
+        
         elements.append(Paragraph(
-            f"Virement Stripe: {payout_id}",
+            payout_link,
             self.styles['SubsectionHeader']
         ))
         
@@ -139,9 +154,19 @@ class PDFExporter:
             self.styles['SectionHeader']
         ))
         
+        # Create clickable payout ID
+        payout_url = get_stripe_dashboard_url(summary.payout_id, self.account_id)
+        if payout_url:
+            payout_id_cell = Paragraph(
+                f'<a href="{payout_url}" color="#2E75B6"><u>{summary.payout_id}</u></a>',
+                self.styles['NormalText']
+            )
+        else:
+            payout_id_cell = summary.payout_id
+        
         # Payout info table
         info_data = [
-            ["ID Payout", summary.payout_id],
+            ["ID Payout", payout_id_cell],
             ["Date de création", format_date_fr(summary.date)],
             ["Date d'arrivée", format_date_fr(summary.date_arrivee)],
             ["Montant", self._format_amount(summary.montant, summary.devise)],
@@ -169,8 +194,16 @@ class PDFExporter:
         
         return elements
     
+    def _format_signed_amount(self, amount: Decimal, currency: str, is_positive: bool) -> str:
+        """Format amount with explicit +/- sign for clarity."""
+        formatted = format_currency_fr(int(abs(amount) * 100), currency)
+        if is_positive:
+            return f"+{formatted}"
+        else:
+            return f"-{formatted}"
+    
     def _create_financial_section(self, summary: PayoutSummary) -> List:
-        """Create the financial breakdown section."""
+        """Create the financial breakdown section with clear +/- signs."""
         elements = []
         
         elements.append(Paragraph(
@@ -178,19 +211,60 @@ class PDFExporter:
             self.styles['SectionHeader']
         ))
         
-        # Financial breakdown table
+        # Build financial data with signed amounts for clarity
         financial_data = [
-            ["Catégorie", "Montant", "Devise"],
-            ["Total Paiements", self._format_amount(summary.total_paiements, summary.devise), summary.devise],
-            ["Total Remboursements", self._format_amount(summary.total_remboursements, summary.devise), summary.devise],
-            ["Total Frais Stripe", self._format_amount(summary.total_frais, summary.devise), summary.devise],
-            ["Total Litiges", self._format_amount(summary.total_litiges, summary.devise), summary.devise],
-            ["Total Autres", self._format_amount(summary.total_autres, summary.devise), summary.devise],
-            ["", "", ""],
-            ["MONTANT NET VIRÉ", self._format_amount(summary.montant, summary.devise), summary.devise],
+            ["Catégorie", "Montant"],
         ]
         
-        financial_table = Table(financial_data, colWidths=[7*cm, 5*cm, 3*cm])
+        # Payments are positive (credits)
+        if summary.total_paiements > 0:
+            financial_data.append([
+                "Total Paiements",
+                self._format_signed_amount(summary.total_paiements, summary.devise, True),
+            ])
+        
+        # Refunds are negative (debits)
+        if summary.total_remboursements > 0:
+            financial_data.append([
+                "Total Remboursements",
+                self._format_signed_amount(summary.total_remboursements, summary.devise, False),
+            ])
+        
+        # Fees are negative (debits)
+        if summary.total_frais > 0:
+            financial_data.append([
+                "Total Frais Stripe",
+                self._format_signed_amount(summary.total_frais, summary.devise, False),
+            ])
+        
+        # Disputes are negative (debits)
+        if summary.total_litiges > 0:
+            financial_data.append([
+                "Total Litiges",
+                self._format_signed_amount(summary.total_litiges, summary.devise, False),
+            ])
+        
+        # Other amounts (can be positive or negative)
+        if summary.total_autres != 0:
+            is_positive = summary.total_autres > 0
+            financial_data.append([
+                "Total Autres",
+                self._format_signed_amount(abs(summary.total_autres), summary.devise, is_positive),
+            ])
+        
+        # Add separator and total
+        financial_data.append(["", ""])
+        financial_data.append([
+            "MONTANT NET VIRÉ",
+            self._format_amount(summary.montant, summary.devise),
+        ])
+        
+        financial_table = Table(financial_data, colWidths=[9*cm, 6*cm])
+        
+        # Calculate row indices for styling
+        total_row = len(financial_data) - 1
+        separator_row = len(financial_data) - 2
+        
         financial_table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR),
@@ -203,16 +277,15 @@ class PDFExporter:
             ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
-            ('ALIGN', (2, 1), (2, -1), 'CENTER'),
             
             # Total row
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), self.LIGHT_GRAY),
+            ('FONTNAME', (0, total_row), (-1, total_row), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, total_row), (-1, total_row), self.LIGHT_GRAY),
             
-            # Grid
-            ('GRID', (0, 0), (-1, -2), 0.5, colors.gray),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, self.PRIMARY_COLOR),
-            ('LINEBELOW', (0, -1), (-1, -1), 1, self.PRIMARY_COLOR),
+            # Grid (exclude separator row)
+            ('GRID', (0, 0), (-1, separator_row - 1), 0.5, colors.gray),
+            ('LINEABOVE', (0, total_row), (-1, total_row), 1, self.PRIMARY_COLOR),
+            ('LINEBELOW', (0, total_row), (-1, total_row), 1, self.PRIMARY_COLOR),
             
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('TOPPADDING', (0, 0), (-1, -1), 8),
@@ -264,6 +337,31 @@ class PDFExporter:
         
         return elements
     
+    def _create_reference_link(self, reference: str, source_id: str = None) -> Paragraph:
+        """
+        Create a clickable reference link to Stripe dashboard.
+        
+        Args:
+            reference: The Stripe reference ID (txn_xxx) for display
+            source_id: The source object ID (ch_, pi_, re_, etc.) for the actual link
+            
+        Returns:
+            Paragraph with clickable link or plain text if no URL available
+        """
+        display_ref = reference[:35] + "..." if len(reference) > 35 else reference
+        
+        # Use source_id for the URL (since txn_ IDs don't have dashboard pages)
+        # Fall back to reference if source_id is not available
+        link_id = source_id or reference
+        url = get_stripe_dashboard_url(link_id, self.account_id)
+        
+        if url:
+            # Create clickable link with underline
+            link_text = f'<a href="{url}" color="#2E75B6"><u>{display_ref}</u></a>'
+            return Paragraph(link_text, self.styles['TableLink'])
+        else:
+            return Paragraph(display_ref, self.styles['TableLink'])
+    
     def _create_transactions_section(self, transactions: List[TransactionRecord]) -> List:
         """Create the transactions detail section."""
         elements = []
@@ -290,7 +388,7 @@ class PDFExporter:
         for tx in displayed_transactions:
             row = [
                 format_date_fr(tx.date),
-                tx.reference[:15] + "..." if len(tx.reference) > 15 else tx.reference,
+                self._create_reference_link(tx.reference, tx.source_id),
                 tx.type[:15] if tx.type else "",
                 self._format_amount(tx.montant_brut, tx.devise),
                 self._format_amount(tx.frais, tx.devise),
@@ -298,8 +396,8 @@ class PDFExporter:
             ]
             data_rows.append(row)
         
-        # Create table
-        tx_table = Table(data_rows, colWidths=[2.5*cm, 3*cm, 3*cm, 3*cm, 2.5*cm, 3*cm])
+        # Create table - column widths: Date=2.2cm, Réf=5cm, Type=2.3cm, Brut=2.5cm, Frais=2cm, Net=3cm (total=17cm)
+        tx_table = Table(data_rows, colWidths=[2*cm, 6*cm, 2.75*cm, 2.1*cm, 2.1*cm, 2.1*cm])
         tx_table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR),
@@ -372,6 +470,9 @@ class PDFExporter:
         Returns:
             Path to the created file
         """
+        # Store account_id for URL generation
+        self.account_id = data.account_id
+        
         filepath = os.path.join(self.output_dir, filename)
         
         doc = SimpleDocTemplate(

@@ -13,7 +13,7 @@ class TransactionRecord:
     """Represents a single financial transaction for accounting purposes."""
     
     date: datetime
-    reference: str  # Stripe transaction ID
+    reference: str  # Stripe transaction ID (txn_xxx)
     type: str  # Transaction type (Paiement, Remboursement, Frais, etc.)
     description: str
     montant_brut: Decimal  # Gross amount in cents
@@ -22,6 +22,7 @@ class TransactionRecord:
     devise: str  # Currency (EUR, USD, etc.)
     client: Optional[str] = None  # Customer name/email
     numero_facture: Optional[str] = None  # Invoice number
+    source_id: Optional[str] = None  # Source object ID (ch_, pi_, re_, etc.) for dashboard links
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -96,6 +97,70 @@ class FeeRecord:
 
 
 @dataclass
+class RefundRecord:
+    """Represents a refund for accounting purposes."""
+    
+    refund_id: str
+    date: datetime
+    montant: Decimal
+    devise: str
+    statut: str
+    raison: Optional[str] = None
+    charge_id: Optional[str] = None
+    invoice_number: Optional[str] = None
+    client_nom: Optional[str] = None
+    credit_note_number: Optional[str] = None
+    credit_note_pdf_url: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for export."""
+        return {
+            "ID Remboursement": self.refund_id,
+            "Date": self.date,
+            "Montant": self.montant,
+            "Devise": self.devise,
+            "Statut": self.statut,
+            "Raison": self.raison or "",
+            "ID Charge": self.charge_id or "",
+            "N° Facture": self.invoice_number or "",
+            "Client": self.client_nom or "",
+            "N° Avoir": self.credit_note_number or "",
+        }
+
+
+@dataclass 
+class CreditNoteRecord:
+    """Represents a credit note (avoir) for accounting purposes."""
+    
+    numero: str  # Credit note number
+    date: datetime
+    invoice_number: Optional[str]
+    client_nom: str
+    client_email: str
+    montant: Decimal  # Total amount
+    devise: str
+    statut: str  # issued, void
+    raison: Optional[str] = None
+    pdf_url: Optional[str] = None
+    stripe_id: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for export."""
+        return {
+            "N° Avoir": self.numero,
+            "Date": self.date,
+            "N° Facture Origine": self.invoice_number or "",
+            "Client": self.client_nom,
+            "Email": self.client_email,
+            "Montant": self.montant,
+            "Devise": self.devise,
+            "Statut": self.statut,
+            "Raison": self.raison or "",
+            "ID Stripe": self.stripe_id
+        }
+
+
+@dataclass
 class PayoutSummary:
     """Summary of a payout for the accounting report."""
     
@@ -152,5 +217,8 @@ class PayoutExportData:
     transactions: List[TransactionRecord]
     invoices: List[InvoiceRecord]
     fees: List[FeeRecord]
+    refunds: List[RefundRecord] = field(default_factory=list)
+    credit_notes: List[CreditNoteRecord] = field(default_factory=list)
     raw_data: Dict[str, Any] = field(default_factory=dict)
+    account_id: Optional[str] = None  # Stripe account ID for dashboard URLs
 
